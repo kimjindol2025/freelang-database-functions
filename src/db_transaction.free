@@ -1,0 +1,289 @@
+// DB_TRANSACTION: Atomic Transaction Management (원자적 단위)
+// 2-Phase Commit (2PC) for distributed consistency
+// Philosophy: "전부가 아니면 전무" - All or Nothing
+
+// ============ TRANSACTION STATE STRUCTURES ============
+
+struct Transaction {
+  tx_id: str,
+  status: str,  // INITIATED, PREPARED, COMMITTED, ROLLED_BACK, FAILED
+  operations: [str; 1000],
+  operation_count: u64,
+  start_time: u64,
+  is_distributed: bool,
+  participant_count: u64
+}
+
+fn new_transaction() -> Transaction {
+  Transaction {
+    tx_id: "tx_" + to_string(random_u64()),
+    status: "INITIATED",
+    operations: [],
+    operation_count: 0,
+    start_time: 0,
+    is_distributed: false,
+    participant_count: 0
+  }
+}
+
+// ============ 2-PHASE COMMIT PROTOCOL ============
+
+struct TwoPhaseCommitState {
+  phase1_prepare: [bool; 100],  // Participant vote arrays
+  phase1_ready: u64,
+  phase1_failed: u64,
+  phase2_commit: [bool; 100],
+  phase2_acknowledge: u64,
+  global_decision: str,         // COMMIT or ABORT
+  decision_timestamp: u64
+}
+
+fn new_2pc_state() -> TwoPhaseCommitState {
+  TwoPhaseCommitState {
+    phase1_prepare: [],
+    phase1_ready: 0,
+    phase1_failed: 0,
+    phase2_commit: [],
+    phase2_acknowledge: 0,
+    global_decision: "PENDING",
+    decision_timestamp: 0
+  }
+}
+
+// ============ PHASE 1: PREPARE (VOTING) ============
+
+fn phase1_prepare(tx: Transaction, participants: u64) -> TwoPhaseCommitState {
+  let mut state: TwoPhaseCommitState = new_2pc_state()
+
+  // Coordinator sends PREPARE to all participants
+  for i in 0..participants {
+    // Each participant:
+    // 1. Executes transaction up to PREPARE point
+    // 2. Locks resources
+    // 3. Writes undo/redo logs
+    // 4. Responds with YES or NO
+
+    state.phase1_prepare[i as usize] = true  // Simplified: all vote YES
+    state.phase1_ready = state.phase1_ready + 1
+  }
+
+  // Check if all participants voted YES
+  if state.phase1_ready == participants {
+    state.global_decision = "CAN_COMMIT"
+  } else {
+    state.global_decision = "MUST_ABORT"
+  }
+
+  state
+}
+
+// ============ PHASE 2: COMMIT/ABORT ============
+
+fn phase2_execute_decision(state: TwoPhaseCommitState, decision: str) -> TwoPhaseCommitState {
+  let mut new_state: TwoPhaseCommitState = state
+
+  if decision == "COMMIT" {
+    // Coordinator sends COMMIT to all participants
+    // Each participant:
+    // 1. Completes the transaction
+    // 2. Releases locks
+    // 3. Writes commit record to stable storage
+    // 4. Responds with ACK
+
+    new_state.global_decision = "COMMITTED"
+  } else if decision == "ABORT" {
+    // Coordinator sends ROLLBACK to all participants
+    // Each participant:
+    // 1. Uses undo logs to restore previous state
+    // 2. Releases locks
+    // 3. Responds with ACK
+
+    new_state.global_decision = "ABORTED"
+  }
+
+  new_state
+}
+
+// ============ COMMIT OPERATION ============
+
+fn db_commit(tx: Transaction) -> Transaction {
+  let mut committed_tx: Transaction = tx
+
+  // In real 2PC:
+  // 1. Send PREPARE to all participants
+  let state: TwoPhaseCommitState = phase1_prepare(tx, tx.participant_count)
+
+  // 2. If all participants vote YES, send COMMIT
+  if state.global_decision == "CAN_COMMIT" {
+    let final_state: TwoPhaseCommitState = phase2_execute_decision(state, "COMMIT")
+    committed_tx.status = "COMMITTED"
+  } else {
+    committed_tx.status = "ROLLED_BACK"
+  }
+
+  committed_tx
+}
+
+// ============ ROLLBACK OPERATION ============
+
+fn db_rollback(tx: Transaction) -> Transaction {
+  let mut rolled_back_tx: Transaction = tx
+
+  // Send ROLLBACK to all participants
+  // They restore from undo logs
+
+  rolled_back_tx.status = "ROLLED_BACK"
+
+  rolled_back_tx
+}
+
+// ============ ADD OPERATION TO TRANSACTION ============
+
+fn tx_add_operation(tx: Transaction, operation: str) -> Transaction {
+  let mut new_tx: Transaction = tx
+
+  if new_tx.operation_count < 1000 {
+    new_tx.operations[new_tx.operation_count as usize] = operation
+    new_tx.operation_count = new_tx.operation_count + 1
+  }
+
+  new_tx
+}
+
+// ============ SAVEPOINTS ============
+
+struct Savepoint {
+  savepoint_id: str,
+  operation_index: u64,
+  created_timestamp: u64
+}
+
+fn create_savepoint(tx: Transaction) -> Savepoint {
+  Savepoint {
+    savepoint_id: "sp_" + to_string(random_u64()),
+    operation_index: tx.operation_count,
+    created_timestamp: 0
+  }
+}
+
+fn rollback_to_savepoint(tx: Transaction, savepoint: Savepoint) -> Transaction {
+  let mut rolled_back_tx: Transaction = tx
+
+  // Rollback operations added after savepoint
+  let rollback_count: u64 = tx.operation_count - savepoint.operation_index
+  rolled_back_tx.operation_count = savepoint.operation_index
+
+  rolled_back_tx
+}
+
+// ============ DISTRIBUTED TRANSACTION SUPPORT ============
+
+struct DistributedTransaction {
+  global_tx_id: str,
+  local_transactions: [str; 100],
+  local_tx_count: u64,
+  coordination_mode: str,  // 2PC or EVENTUAL_CONSISTENCY
+  status: str
+}
+
+fn new_distributed_transaction() -> DistributedTransaction {
+  DistributedTransaction {
+    global_tx_id: "dtx_" + to_string(random_u64()),
+    local_transactions: [],
+    local_tx_count: 0,
+    coordination_mode: "2PC",
+    status: "INITIATED"
+  }
+}
+
+fn coordinate_2pc(dtx: DistributedTransaction) -> DistributedTransaction {
+  let mut coordinated_tx: DistributedTransaction = dtx
+
+  // Phase 1: Send PREPARE to all local transaction managers
+  let mut all_ready: bool = true
+  for i in 0..dtx.local_tx_count {
+    // Each local TM votes on readiness
+    // In simplified model, all vote YES
+  }
+
+  // Phase 2: Send global decision
+  if all_ready {
+    coordinated_tx.status = "COMMITTED"
+  } else {
+    coordinated_tx.status = "ABORTED"
+  }
+
+  coordinated_tx
+}
+
+// ============ TRANSACTION ISOLATION LEVELS ============
+
+struct IsolationLevel {
+  level_name: str,
+  dirty_read_possible: bool,
+  non_repeatable_read_possible: bool,
+  phantom_read_possible: bool,
+  lock_strength: str
+}
+
+fn isolation_read_uncommitted() -> IsolationLevel {
+  IsolationLevel {
+    level_name: "READ_UNCOMMITTED",
+    dirty_read_possible: true,
+    non_repeatable_read_possible: true,
+    phantom_read_possible: true,
+    lock_strength: "NONE"
+  }
+}
+
+fn isolation_read_committed() -> IsolationLevel {
+  IsolationLevel {
+    level_name: "READ_COMMITTED",
+    dirty_read_possible: false,
+    non_repeatable_read_possible: true,
+    phantom_read_possible: true,
+    lock_strength: "ROW_LOCK"
+  }
+}
+
+fn isolation_repeatable_read() -> IsolationLevel {
+  IsolationLevel {
+    level_name: "REPEATABLE_READ",
+    dirty_read_possible: false,
+    non_repeatable_read_possible: false,
+    phantom_read_possible: true,
+    lock_strength: "TABLE_LOCK"
+  }
+}
+
+fn isolation_serializable() -> IsolationLevel {
+  IsolationLevel {
+    level_name: "SERIALIZABLE",
+    dirty_read_possible: false,
+    non_repeatable_read_possible: false,
+    phantom_read_possible: false,
+    lock_strength: "FULL_SERIALIZATION"
+  }
+}
+
+// ============ TRANSACTION STATISTICS ============
+
+struct TransactionStats {
+  total_transactions: u64,
+  committed: u64,
+  rolled_back: u64,
+  avg_duration_ms: f64,
+  failed_2pc: u64,
+  deadlock_detected: u64
+}
+
+fn new_transaction_stats() -> TransactionStats {
+  TransactionStats {
+    total_transactions: 0,
+    committed: 0,
+    rolled_back: 0,
+    avg_duration_ms: 0.0,
+    failed_2pc: 0,
+    deadlock_detected: 0
+  }
+}

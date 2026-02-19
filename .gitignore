@@ -1,0 +1,68 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# FreeLang artifacts
+*.free.js
+*.free.wasm
+dist/
+build/
+out/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.ldb
+*.rocksdb
+
+# Backup files
+*.bak
+*.backup
+*.snap
+*.snapshot
+
+# WAL and journal files
+*.wal
+*.journal
+*.log
+
+# Node modules (if used)
+node_modules/
+package-lock.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+npm-debug.log*
+yarn-debug.log*
+
+# Dependencies
+.npm
+.env
+.env.local
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary
+temp/
+tmp/
+*.tmp
+cache/
+
+# OS files
+.DS_Store
+Thumbs.db

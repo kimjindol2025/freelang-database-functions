@@ -1,0 +1,314 @@
+// DB_INDEX: Index Management (지름길 생성)
+// B-Tree and Hash index creation and optimization
+// Philosophy: "시간이 흐를수록 더 빨라지는 데이터베이스" - Database gets faster over time
+
+// ============ INDEX STRUCTURES ============
+
+struct BTreeNode {
+  node_id: u64,
+  keys: [str; 100],
+  key_count: u64,
+  children: [u64; 101],
+  is_leaf: bool,
+  level: u64
+}
+
+struct HashIndex {
+  bucket_count: u64,
+  buckets: [str; 10000],
+  load_factor: f64,
+  collision_count: u64,
+  rehash_threshold: f64
+}
+
+struct IndexMetadata {
+  index_name: str,
+  table_name: str,
+  column_name: str,
+  index_type: str,           // BTREE, HASH, BITMAP
+  creation_time: u64,
+  is_unique: bool,
+  leaf_page_count: u64,
+  non_leaf_page_count: u64,
+  cardinality: u64
+}
+
+fn new_index_metadata(name: str, table: str, column: str, index_type: str) -> IndexMetadata {
+  IndexMetadata {
+    index_name: name,
+    table_name: table,
+    column_name: column,
+    index_type: index_type,
+    creation_time: 0,
+    is_unique: false,
+    leaf_page_count: 0,
+    non_leaf_page_count: 0,
+    cardinality: 0
+  }
+}
+
+// ============ B-TREE INDEX OPERATIONS ============
+
+fn create_btree_index(table_name: str, column_name: str) -> IndexMetadata {
+  let mut metadata: IndexMetadata = new_index_metadata(
+    table_name + "_" + column_name + "_btree",
+    table_name,
+    column_name,
+    "BTREE"
+  )
+
+  // In real implementation:
+  // 1. Scan table column
+  // 2. Build B-Tree from values
+  // 3. Calculate leaf/non-leaf page counts
+  // 4. Store index structure
+
+  metadata.leaf_page_count = 100      // Placeholder
+  metadata.non_leaf_page_count = 10   // Placeholder
+  metadata.cardinality = 10000        // Placeholder
+
+  metadata
+}
+
+fn btree_search(index: BTreeNode, search_key: str) -> bool {
+  // Binary search in current node
+  let mut left: u64 = 0
+  let mut right: u64 = index.key_count
+
+  while left < right {
+    let mid: u64 = (left + right) / 2
+    if index.keys[mid as usize] == search_key {
+      return true
+    } else if index.keys[mid as usize] < search_key {
+      left = mid + 1
+    } else {
+      right = mid
+    }
+  }
+
+  // If not found and not leaf, recurse
+  if !index.is_leaf && left <= index.key_count {
+    // In real implementation, follow child pointer
+    // btree_search(children[left], search_key)
+  }
+
+  false
+}
+
+fn btree_insert(node: BTreeNode, key: str, value: str) -> BTreeNode {
+  let mut new_node: BTreeNode = node
+
+  if new_node.key_count < 100 {
+    // Find insertion position (keep sorted)
+    let mut insert_pos: u64 = 0
+    for i in 0..new_node.key_count {
+      if new_node.keys[i as usize] > key {
+        insert_pos = i
+        break
+      } else {
+        insert_pos = i + 1
+      }
+    }
+
+    // Shift keys right
+    for i in (insert_pos + 1)..new_node.key_count + 1 {
+      if i > 0 {
+        new_node.keys[i as usize] = new_node.keys[(i - 1) as usize]
+      }
+    }
+
+    // Insert new key
+    new_node.keys[insert_pos as usize] = key
+    new_node.key_count = new_node.key_count + 1
+  }
+
+  new_node
+}
+
+// ============ HASH INDEX OPERATIONS ============
+
+fn create_hash_index(table_name: str, column_name: str) -> IndexMetadata {
+  let mut metadata: IndexMetadata = new_index_metadata(
+    table_name + "_" + column_name + "_hash",
+    table_name,
+    column_name,
+    "HASH"
+  )
+
+  // Hash index for exact match queries only
+  metadata.cardinality = 50000  // Placeholder
+
+  metadata
+}
+
+fn hash_function(key: str, bucket_count: u64) -> u64 {
+  // Simple hash: sum of character codes modulo bucket_count
+  let mut hash: u64 = 0
+
+  for i in 0..len(key) {
+    let ch: char = key.char_at(i)
+    hash = hash + (ch as u64)
+  }
+
+  hash % bucket_count
+}
+
+fn hash_index_insert(index: HashIndex, key: str, value: str) -> HashIndex {
+  let mut new_index: HashIndex = index
+
+  let bucket_idx: u64 = hash_function(key, new_index.bucket_count)
+
+  // Check load factor
+  if new_index.load_factor > new_index.rehash_threshold {
+    // Trigger rehashing (not implemented)
+  }
+
+  // Insert into bucket (simplified: append)
+  let append_pos: u64 = bucket_idx * 100  // Assume 100 slots per bucket
+  new_index.buckets[append_pos as usize] = key + ":" + value
+
+  // Count collision if bucket not empty
+  if len(new_index.buckets[bucket_idx as usize]) > 0 {
+    new_index.collision_count = new_index.collision_count + 1
+  }
+
+  new_index
+}
+
+fn hash_index_lookup(index: HashIndex, key: str) -> bool {
+  let bucket_idx: u64 = hash_function(key, index.bucket_count)
+  let append_pos: u64 = bucket_idx * 100
+
+  // Check if entry exists in bucket
+  if len(index.buckets[append_pos as usize]) > 0 {
+    return contains(index.buckets[append_pos as usize], key)
+  }
+
+  false
+}
+
+// ============ INDEX STATISTICS ============
+
+struct IndexStats {
+  index_name: str,
+  total_keys: u64,
+  tree_height: u64,
+  btree_nodes: u64,
+  hash_buckets: u64,
+  collision_count: u64,
+  query_uses: u64,
+  avg_query_time_ns: f64
+}
+
+fn new_index_stats(name: str) -> IndexStats {
+  IndexStats {
+    index_name: name,
+    total_keys: 0,
+    tree_height: 0,
+    btree_nodes: 0,
+    hash_buckets: 0,
+    collision_count: 0,
+    query_uses: 0,
+    avg_query_time_ns: 0.0
+  }
+}
+
+// ============ INDEX PERFORMANCE RECOMMENDATIONS ============
+
+struct IndexRecommendation {
+  column_name: str,
+  recommended_type: str,  // BTREE, HASH, BITMAP
+  priority: u64,          // 1 (high) to 10 (low)
+  estimated_improvement: f64,
+  reasoning: str
+}
+
+fn recommend_indexes(table_name: str, query_stats: [str; 1000], stat_count: u64) -> [IndexRecommendation; 100] {
+  let mut recommendations: [IndexRecommendation; 100] = []
+  let mut rec_count: u64 = 0
+
+  // Analyze query patterns
+  for i in 0..stat_count {
+    let query: str = query_stats[i as usize]
+
+    // Find frequently used columns in WHERE clauses
+    let where_pos: i64 = find(query, "WHERE")
+    if where_pos >= 0 && rec_count < 100 {
+      // Extract column name (simplified)
+      let mut recommendation: IndexRecommendation = IndexRecommendation {
+        column_name: "col_" + to_string(i),
+        recommended_type: "BTREE",
+        priority: (i % 10) as u64 + 1,
+        estimated_improvement: 10.0 * (10.0 - ((i % 10) as f64)),
+        reasoning: "Frequently used in range queries"
+      }
+
+      recommendations[rec_count as usize] = recommendation
+      rec_count = rec_count + 1
+    }
+  }
+
+  recommendations
+}
+
+// ============ INDEX MAINTENANCE ============
+
+fn rebuild_index(metadata: IndexMetadata) -> IndexMetadata {
+  let mut rebuilt: IndexMetadata = metadata
+
+  // Rebuilding involves:
+  // 1. Drop current index
+  // 2. Rescan table
+  // 3. Recreate from scratch
+  // Used when index becomes fragmented
+
+  rebuilt.leaf_page_count = 100
+  rebuilt.non_leaf_page_count = 10
+
+  rebuilt
+}
+
+fn defragment_index(metadata: IndexMetadata) -> IndexMetadata {
+  let mut defrag: IndexMetadata = metadata
+
+  // Defragmentation reorganizes pages without full rebuild
+  // Faster than rebuild but less optimal
+
+  defrag
+}
+
+fn analyze_index(metadata: IndexMetadata) -> IndexStats {
+  let mut stats: IndexStats = new_index_stats(metadata.index_name)
+
+  stats.total_keys = metadata.cardinality
+  stats.btree_nodes = metadata.leaf_page_count + metadata.non_leaf_page_count
+  stats.tree_height = 4  // Placeholder
+
+  stats
+}
+
+// ============ MULTI-COLUMN INDEXES ============
+
+struct CompositeIndex {
+  index_name: str,
+  columns: [str; 20],
+  column_count: u64,
+  index_type: str
+}
+
+fn create_composite_index(table_name: str, columns: [str; 20], col_count: u64) -> CompositeIndex {
+  let mut columns_str: str = ""
+  for i in 0..col_count {
+    if i > 0 {
+      columns_str = columns_str + "_"
+    }
+    columns_str = columns_str + columns[i as usize]
+  }
+
+  CompositeIndex {
+    index_name: table_name + "_" + columns_str + "_idx",
+    columns: columns,
+    column_count: col_count,
+    index_type: "BTREE"
+  }
+}

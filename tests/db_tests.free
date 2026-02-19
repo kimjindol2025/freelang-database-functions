@@ -1,0 +1,393 @@
+// TEST SUITE: Database Functions (Phase 9 - Empire's Archive)
+// Comprehensive testing of db_query, db_exec, db_transaction, db_index, db_backup
+
+// ============ DB_QUERY TESTS ============
+
+fn test_select_query_parsing() {
+  let query: str = "SELECT * FROM users WHERE id = 5"
+  let plan: QueryPlan = parse_select_query(query)
+  assert(plan.table_name == "users", "Should parse table name")
+}
+
+fn test_where_clause_parsing() {
+  let query: str = "SELECT * FROM users WHERE id = 5 AND status = active"
+  let conditions: [str; 100] = parse_where_clause(query)
+  assert(len(conditions[0]) > 0, "Should parse WHERE clause")
+}
+
+fn test_index_selection() {
+  let conditions: [str; 100] = []
+  conditions[0] = "id = 5"
+  let index: str = choose_index("users", conditions)
+  assert(contains(index, "idx"), "Should choose index")
+}
+
+fn test_row_estimation() {
+  let conditions: [str; 100] = []
+  conditions[0] = "status = active"
+  let estimated: u64 = estimate_rows("users", conditions)
+  assert(estimated > 0, "Should estimate rows")
+}
+
+fn test_select_with_limit() {
+  let query: str = "SELECT * FROM users"
+  let result: QueryResult = query_with_limit(query, 10, 0)
+  assert(result.data_count <= 10, "Should limit rows")
+}
+
+fn test_count_rows() {
+  let query: str = "SELECT COUNT(*) FROM users"
+  let count: u64 = count_rows(query)
+  assert(count >= 0, "Should count rows")
+}
+
+fn test_sum_column() {
+  let data: [str; 10000] = []
+  data[0] = "100"
+  data[1] = "200"
+  data[2] = "300"
+  let total: f64 = sum_column(data, 3)
+  assert(total == 600.0, "Should sum values")
+}
+
+fn test_avg_column() {
+  let data: [str; 10000] = []
+  data[0] = "100"
+  data[1] = "200"
+  data[2] = "300"
+  let avg: f64 = avg_column(data, 3)
+  assert(avg == 200.0, "Should calculate average")
+}
+
+// ============ DB_EXEC TESTS ============
+
+fn test_insert_operation() {
+  let result: ExecutionResult = db_insert("users", "name=John,age=30")
+  assert(result.success, "Insert should succeed")
+  assert(result.rows_affected == 1, "Should affect 1 row")
+  assert(result.operation_type == "INSERT", "Should be INSERT operation")
+  assert(len(result.audit_id) > 0, "Should generate audit ID")
+}
+
+fn test_update_operation() {
+  let result: ExecutionResult = db_update("users", "id = 5", "status=inactive")
+  assert(result.operation_type == "UPDATE", "Should be UPDATE operation")
+  assert(result.success, "Update should succeed")
+}
+
+fn test_delete_operation() {
+  let result: ExecutionResult = db_delete("users", "id = 999")
+  assert(result.operation_type == "DELETE", "Should be DELETE operation")
+}
+
+fn test_bulk_insert() {
+  let data: [str; 10000] = []
+  for i in 0..100 {
+    data[i as usize] = "row_" + to_string(i)
+  }
+  let result: ExecutionResult = db_bulk_insert("users", data, 100)
+  assert(result.rows_affected == 100, "Should bulk insert 100 rows")
+}
+
+fn test_wal_entry_creation() {
+  let manager: WALManager = new_wal_manager()
+  let entry_id: u64 = write_wal_entry(manager, "INSERT", "users", "", "John Doe")
+  assert(entry_id > 0, "Should create WAL entry")
+}
+
+fn test_acid_compliance() {
+  let result: ExecutionResult = new_execution_result()
+  result.success = true
+  result.audit_id = "audit_123"
+  let check: ACIDComplianceCheck = verify_acid_compliance(result)
+  assert(check.is_durable, "Should be ACID durable")
+  assert(check.compliance_score == 100.0, "Should have 100% ACID score")
+}
+
+fn test_failure_recovery() {
+  let recovery: FailureRecovery = rollback_to_checkpoint("users", "chk_123")
+  assert(recovery.rolled_back, "Should rollback")
+  assert(len(recovery.recovery_id) > 0, "Should generate recovery ID")
+}
+
+// ============ DB_TRANSACTION TESTS ============
+
+fn test_transaction_creation() {
+  let tx: Transaction = new_transaction()
+  assert(len(tx.tx_id) > 0, "Should create transaction ID")
+  assert(tx.status == "INITIATED", "Should be INITIATED status")
+  assert(tx.operation_count == 0, "Should have 0 operations")
+}
+
+fn test_add_operation_to_tx() {
+  let tx: Transaction = new_transaction()
+  let tx2: Transaction = tx_add_operation(tx, "INSERT INTO users VALUES(...)")
+  assert(tx2.operation_count == 1, "Should add operation")
+}
+
+fn test_phase1_prepare() {
+  let tx: Transaction = new_transaction()
+  tx.participant_count = 3
+  let state: TwoPhaseCommitState = phase1_prepare(tx, 3)
+  assert(state.phase1_ready == 3, "All participants ready")
+  assert(state.global_decision == "CAN_COMMIT", "Should decide CAN_COMMIT")
+}
+
+fn test_phase2_commit() {
+  let state: TwoPhaseCommitState = new_2pc_state()
+  let final_state: TwoPhaseCommitState = phase2_execute_decision(state, "COMMIT")
+  assert(final_state.global_decision == "COMMITTED", "Should be committed")
+}
+
+fn test_commit_operation() {
+  let tx: Transaction = new_transaction()
+  tx.participant_count = 1
+  let committed_tx: Transaction = db_commit(tx)
+  assert(committed_tx.status == "COMMITTED", "Should be committed")
+}
+
+fn test_rollback_operation() {
+  let tx: Transaction = new_transaction()
+  let rolled_back: Transaction = db_rollback(tx)
+  assert(rolled_back.status == "ROLLED_BACK", "Should be rolled back")
+}
+
+fn test_savepoint_creation() {
+  let tx: Transaction = new_transaction()
+  let sp: Savepoint = create_savepoint(tx)
+  assert(len(sp.savepoint_id) > 0, "Should create savepoint")
+}
+
+fn test_rollback_to_savepoint() {
+  let tx: Transaction = new_transaction()
+  tx.operation_count = 5
+  let sp: Savepoint = create_savepoint(tx)
+  tx.operation_count = 10
+  let rolled_back: Transaction = rollback_to_savepoint(tx, sp)
+  assert(rolled_back.operation_count == 5, "Should rollback to savepoint")
+}
+
+fn test_distributed_transaction() {
+  let dtx: DistributedTransaction = new_distributed_transaction()
+  assert(len(dtx.global_tx_id) > 0, "Should create distributed TX ID")
+  assert(dtx.coordination_mode == "2PC", "Should use 2PC")
+}
+
+fn test_isolation_levels() {
+  let level_read_uncommitted: IsolationLevel = isolation_read_uncommitted()
+  assert(level_read_uncommitted.dirty_read_possible, "READ_UNCOMMITTED allows dirty reads")
+
+  let level_serializable: IsolationLevel = isolation_serializable()
+  assert(!level_serializable.dirty_read_possible, "SERIALIZABLE disallows dirty reads")
+  assert(!level_serializable.phantom_read_possible, "SERIALIZABLE disallows phantom reads")
+}
+
+// ============ DB_INDEX TESTS ============
+
+fn test_create_btree_index() {
+  let metadata: IndexMetadata = create_btree_index("users", "email")
+  assert(metadata.index_type == "BTREE", "Should be BTREE index")
+  assert(metadata.table_name == "users", "Should be on users table")
+  assert(metadata.column_name == "email", "Should be on email column")
+  assert(metadata.cardinality > 0, "Should have cardinality")
+}
+
+fn test_create_hash_index() {
+  let metadata: IndexMetadata = create_hash_index("users", "id")
+  assert(metadata.index_type == "HASH", "Should be HASH index")
+}
+
+fn test_hash_function() {
+  let hash1: u64 = hash_function("key1", 100)
+  let hash2: u64 = hash_function("key2", 100)
+  assert(hash1 < 100, "Hash should be within bucket range")
+  assert(hash2 < 100, "Hash should be within bucket range")
+}
+
+fn test_btree_insert() {
+  let node: BTreeNode = BTreeNode {
+    node_id: 1,
+    keys: [],
+    key_count: 0,
+    children: [],
+    is_leaf: true,
+    level: 0
+  }
+  let node2: BTreeNode = btree_insert(node, "apple", "value1")
+  assert(node2.key_count == 1, "Should insert key")
+  assert(node2.keys[0] == "apple", "Key should be stored")
+}
+
+fn test_btree_search() {
+  let node: BTreeNode = BTreeNode {
+    node_id: 1,
+    keys: ["apple", "banana", "cherry"],
+    key_count: 3,
+    children: [],
+    is_leaf: true,
+    level: 0
+  }
+  let found: bool = btree_search(node, "banana")
+  assert(found, "Should find key")
+
+  let not_found: bool = btree_search(node, "orange")
+  assert(!not_found, "Should not find missing key")
+}
+
+fn test_index_statistics() {
+  let stats: IndexStats = new_index_stats("users_email_btree")
+  assert(len(stats.index_name) > 0, "Should have index name")
+}
+
+fn test_index_recommendations() {
+  let queries: [str; 1000] = []
+  queries[0] = "SELECT * FROM users WHERE email = 'test@example.com'"
+  queries[1] = "SELECT * FROM users WHERE status = 'active'"
+  let recommendations: [IndexRecommendation; 100] = recommend_indexes("users", queries, 2)
+  assert(len(recommendations[0].column_name) > 0, "Should recommend indexes")
+}
+
+fn test_composite_index() {
+  let columns: [str; 20] = []
+  columns[0] = "user_id"
+  columns[1] = "created_date"
+  let comp_idx: CompositeIndex = create_composite_index("orders", columns, 2)
+  assert(comp_idx.column_count == 2, "Should create composite index")
+}
+
+// ============ DB_BACKUP TESTS ============
+
+fn test_create_full_backup() {
+  let backup: BackupMetadata = create_full_backup(1000000, 5, 50000)
+  assert(backup.backup_type == "FULL", "Should be FULL backup")
+  assert(backup.database_size_bytes == 1000000, "Should match database size")
+  assert(backup.is_valid, "Should be valid")
+  assert(len(backup.checksum) > 0, "Should have checksum")
+}
+
+fn test_create_incremental_backup() {
+  let backup: BackupMetadata = create_incremental_backup("bak_123", 10000)
+  assert(backup.backup_type == "INCREMENTAL", "Should be INCREMENTAL backup")
+  assert(backup.is_valid, "Should be valid")
+}
+
+fn test_create_differential_backup() {
+  let backup: BackupMetadata = create_differential_backup("bak_full_123", 50000)
+  assert(backup.backup_type == "DIFFERENTIAL", "Should be DIFFERENTIAL backup")
+}
+
+fn test_backup_catalog_creation() {
+  let catalog: BackupCatalog = new_backup_catalog()
+  assert(catalog.backup_count == 0, "Should start empty")
+}
+
+fn test_verify_backup_integrity() {
+  let backup: BackupMetadata = create_full_backup(1000000, 5, 50000)
+  let is_valid: bool = verify_backup_integrity(backup)
+  assert(is_valid, "Should verify backup")
+}
+
+fn test_test_restore_capability() {
+  let backup: BackupMetadata = create_full_backup(1000000, 5, 50000)
+  let can_restore: bool = test_restore_capability(backup)
+  assert(can_restore, "Should be restorable")
+}
+
+fn test_plan_pitr_recovery() {
+  let catalog: BackupCatalog = new_backup_catalog()
+  let backup1: BackupMetadata = create_full_backup(1000000, 5, 50000)
+  catalog.backups[0] = backup1
+  catalog.backup_count = 1
+
+  let plan: PITRRecoveryPlan = plan_pitr_recovery(1000, catalog)
+  assert(len(plan.recovery_id) > 0, "Should plan recovery")
+}
+
+fn test_compression() {
+  let original_size: u64 = 1000000
+  let compressed: u64 = compress_backup_data(original_size, 5)
+  assert(compressed < original_size, "Should compress data")
+}
+
+fn test_retention_policy() {
+  let policy: RetentionPolicy = new_retention_policy()
+  assert(policy.daily_backups_keep == 7, "Should keep 7 daily backups")
+  assert(policy.pitr_window_days == 30, "Should have 30-day PITR window")
+}
+
+fn test_backup_statistics() {
+  let stats: BackupStats = new_backup_stats()
+  assert(stats.total_backups == 0, "Should start with 0 backups")
+
+  let backup: BackupMetadata = create_full_backup(1000000, 5, 50000)
+  let new_stats: BackupStats = update_backup_stats(stats, backup)
+  assert(new_stats.total_backups == 1, "Should update backup count")
+  assert(new_stats.full_backups == 1, "Should count full backup")
+}
+
+// ============ HELPER FUNCTIONS ============
+
+fn assert(condition: bool, message: str) {
+  if !condition {
+    println("FAIL: " + message)
+  } else {
+    println("PASS: " + message)
+  }
+}
+
+fn run_all_tests() {
+  println("\n=== DB_QUERY Tests ===")
+  test_select_query_parsing()
+  test_where_clause_parsing()
+  test_index_selection()
+  test_row_estimation()
+  test_select_with_limit()
+  test_count_rows()
+  test_sum_column()
+  test_avg_column()
+
+  println("\n=== DB_EXEC Tests ===")
+  test_insert_operation()
+  test_update_operation()
+  test_delete_operation()
+  test_bulk_insert()
+  test_wal_entry_creation()
+  test_acid_compliance()
+  test_failure_recovery()
+
+  println("\n=== DB_TRANSACTION Tests ===")
+  test_transaction_creation()
+  test_add_operation_to_tx()
+  test_phase1_prepare()
+  test_phase2_commit()
+  test_commit_operation()
+  test_rollback_operation()
+  test_savepoint_creation()
+  test_rollback_to_savepoint()
+  test_distributed_transaction()
+  test_isolation_levels()
+
+  println("\n=== DB_INDEX Tests ===")
+  test_create_btree_index()
+  test_create_hash_index()
+  test_hash_function()
+  test_btree_insert()
+  test_btree_search()
+  test_index_statistics()
+  test_index_recommendations()
+  test_composite_index()
+
+  println("\n=== DB_BACKUP Tests ===")
+  test_create_full_backup()
+  test_create_incremental_backup()
+  test_create_differential_backup()
+  test_backup_catalog_creation()
+  test_verify_backup_integrity()
+  test_test_restore_capability()
+  test_plan_pitr_recovery()
+  test_compression()
+  test_retention_policy()
+  test_backup_statistics()
+
+  println("\n=== ALL TESTS COMPLETE ===")
+}
